@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Trophy, X, Check, Plus, Minus, Save, RefreshCw, BarChart3, Award, Clock, Star } from 'lucide-react';
 
 export default function SistemaPuntuacion() {
-  const SHEET_ID = '1jMdEp8oTOhHLYzddm8Ohm_GbJbG5k9QNTMaWSgPTQNY';
-  const API_KEY = 'AIzaSyB6qq6RPIcPcvb92rwCetn7RG3PfEk4aig';
+  const SHEET_ID = import.meta.env.VITE_SHEET_ID;
+  const API_KEY = import.meta.env.VITE_API_KEY;
   
   const [vista, setVista] = useState('puntuacion'); // 'puntuacion' o 'resultados'
   const [categoria, setCategoria] = useState('sumo');
@@ -63,24 +63,34 @@ export default function SistemaPuntuacion() {
   const cargarResultados = async () => {
     setCargandoResultados(true);
     try {
+      // 🧾 Nombres EXACTOS de las hojas dentro de tu Google Sheet
       const hojas = ['Sumo', 'Carrera', 'Showcase', 'MejorNombre'];
-      const promises = hojas.map(hoja => 
-        fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${hoja}!A:Z?key=${API_KEY}`)
+
+      // 🔑 ID del Google Sheet (el que está en tu URL de Google Sheets)
+      const SHEET_ID = '1jMdEp8oTOhHLYzddm8Ohm_GbJbG5k9QNTMaWSgPTQNY';
+
+      // 🔍 Para cada hoja, pedimos los datos desde OpenSheet (no requiere API key)
+      const promises = hojas.map(hoja =>
+        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${hoja}`)
           .then(res => res.json())
-          .catch(() => ({ values: [] }))
+          .catch(() => [])
       );
-      
+
+      // Esperamos todas las respuestas en paralelo
       const responses = await Promise.all(promises);
-      
+
+      // Guardamos los resultados en el estado
       setResultados({
-        sumo: responses[0].values || [],
-        carrera: responses[1].values || [],
-        showcase: responses[2].values || [],
-        nombre: responses[3].values || []
+        sumo: responses[0] || [],
+        carrera: responses[1] || [],
+        showcase: responses[2] || [],
+        nombre: responses[3] || []
       });
+
+      mostrarMensaje('Resultados cargados correctamente ✅', 'success');
     } catch (error) {
       console.error('Error al cargar resultados:', error);
-      mostrarMensaje('Error al cargar resultados', 'error');
+      mostrarMensaje('Error al cargar resultados ⚠️', 'error');
     } finally {
       setCargandoResultados(false);
     }
