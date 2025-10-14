@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Trophy, X, Check, Plus, Minus, Save, RefreshCw, BarChart3, Award, Clock, Star } from 'lucide-react';
 
 export default function SistemaPuntuacion() {
-  const SHEET_ID = import.meta.env.VITE_SHEET_ID;
-  const API_KEY = import.meta.env.VITE_API_KEY;
+  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzj-8qhQZktFkkODRhMmkPYPSSb4VLJLSAdZMzEfmxYM3gcchEaBT-FYgDVjOhiWt91PA/exec';
   
   const [vista, setVista] = useState('puntuacion'); // 'puntuacion' o 'resultados'
   const [categoria, setCategoria] = useState('sumo');
@@ -63,34 +62,22 @@ export default function SistemaPuntuacion() {
   const cargarResultados = async () => {
     setCargandoResultados(true);
     try {
-      // 🧾 Nombres EXACTOS de las hojas dentro de tu Google Sheet
-      const hojas = ['Sumo', 'Carrera', 'Showcase', 'MejorNombre'];
-
-      // 🔑 ID del Google Sheet (el que está en tu URL de Google Sheets)
-      const SHEET_ID = '1jMdEp8oTOhHLYzddm8Ohm_GbJbG5k9QNTMaWSgPTQNY';
-
-      // 🔍 Para cada hoja, pedimos los datos desde OpenSheet (no requiere API key)
-      const promises = hojas.map(hoja =>
-        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${hoja}`)
-          .then(res => res.json())
-          .catch(() => [])
-      );
-
-      // Esperamos todas las respuestas en paralelo
-      const responses = await Promise.all(promises);
-
-      // Guardamos los resultados en el estado
-      setResultados({
-        sumo: responses[0] || [],
-        carrera: responses[1] || [],
-        showcase: responses[2] || [],
-        nombre: responses[3] || []
-      });
-
-      mostrarMensaje('Resultados cargados correctamente ✅', 'success');
+      const response = await fetch(`${SCRIPT_URL}?action=getResults`);
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        setResultados({
+          sumo: result.data.sumo || [],
+          carrera: result.data.carrera || [],
+          showcase: result.data.showcase || [],
+          nombre: result.data.mejornombre || []
+        });
+      } else {
+        mostrarMensaje('Error al cargar resultados', 'error');
+      }
     } catch (error) {
       console.error('Error al cargar resultados:', error);
-      mostrarMensaje('Error al cargar resultados ⚠️', 'error');
+      mostrarMensaje('Error al cargar resultados', 'error');
     } finally {
       setCargandoResultados(false);
     }
@@ -172,22 +159,27 @@ export default function SistemaPuntuacion() {
       }
 
       const valores = Object.values(datos);
-      const scriptURL = 'https://script.google.com/macros/s/AKfycbz1CC3yPNBnTz_xiRZTG_mF_j4fWcUh1gbXdVz-FtQo6_EEKPPQY6iFWy5msfXgtBJfgQ/exec';
       
-      await fetch(scriptURL, {
+      // Usar no-cors para evitar problemas de CORS en POST
+      await fetch(SCRIPT_URL, {
         method: 'POST',
         mode: 'no-cors',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          spreadsheetId: SHEET_ID,
           sheetName: hoja,
           values: valores
         })
       });
 
+      // Con no-cors no podemos leer la respuesta, así que asumimos éxito
       mostrarMensaje('✓ Datos guardados correctamente', 'success');
+      
+      // Opcional: Recargar resultados después de guardar
+      if (vista === 'resultados') {
+        setTimeout(() => cargarResultados(), 1000);
+      }
       
     } catch (error) {
       console.error('Error:', error);
@@ -246,11 +238,12 @@ export default function SistemaPuntuacion() {
   };
 
   const RankingCarrera = () => {
-    const datos = resultados.carrera.slice(1).map(row => ({
-      equipo: row[2],
-      mejor: row[10],
-      timestamp: row[0]
-    })).filter(d => d.mejor && d.mejor !== '-');
+    // OpenSheet devuelve objetos, no arrays
+    const datos = resultados.carrera.map(row => ({
+      equipo: row.Equipo || row.equipo,
+      mejor: row.MejorTiempo || row.mejorTiempo,
+      timestamp: row.Timestamp || row.timestamp
+    })).filter(d => d.mejor && d.mejor !== '-' && d.equipo);
 
     const ranking = datos.reduce((acc, curr) => {
       const existing = acc.find(e => e.equipo === curr.equipo);
@@ -303,13 +296,13 @@ export default function SistemaPuntuacion() {
   };
 
   const RankingShowcase = () => {
-    const datos = resultados.showcase.slice(1).map(row => ({
-      equipo: row[2],
-      total: parseInt(row[6]) || 0,
-      creatividad: row[3],
-      presentacion: row[4],
-      materiales: row[5]
-    })).sort((a, b) => b.total - a.total);
+    const datos = resultados.showcase.map(row => ({
+      equipo: row.Equipo || row.equipo,
+      total: parseInt(row.Total || row.total) || 0,
+      creatividad: row.Creatividad || row.creatividad,
+      presentacion: row.Presentacion || row.presentacion,
+      materiales: row.Materiales || row.materiales
+    })).filter(d => d.equipo).sort((a, b) => b.total - a.total);
 
     return (
       <div className="card shadow-lg mb-4">
@@ -353,13 +346,13 @@ export default function SistemaPuntuacion() {
   };
 
   const RankingNombre = () => {
-    const datos = resultados.nombre.slice(1).map(row => ({
-      equipo: row[2],
-      nombreRobot: row[3],
-      total: parseInt(row[6]) || 0,
-      originalidad: row[4],
-      creatividad: row[5]
-    })).sort((a, b) => b.total - a.total);
+    const datos = resultados.nombre.map(row => ({
+      equipo: row.Equipo || row.equipo,
+      nombreRobot: row.NombreRobot || row.nombreRobot,
+      total: parseInt(row.Total || row.total) || 0,
+      originalidad: row.Originalidad || row.originalidad,
+      creatividad: row.Creatividad || row.creatividad
+    })).filter(d => d.equipo).sort((a, b) => b.total - a.total);
 
     return (
       <div className="card shadow-lg mb-4">
@@ -403,7 +396,7 @@ export default function SistemaPuntuacion() {
   };
 
   const ResultadosSumo = () => {
-    const datos = resultados.sumo.slice(1);
+    const datos = resultados.sumo.filter(row => row.Equipo1 || row.equipo1);
     
     return (
       <div className="card shadow-lg mb-4">
@@ -424,20 +417,29 @@ export default function SistemaPuntuacion() {
                 </tr>
               </thead>
               <tbody>
-                {datos.reverse().map((row, idx) => (
-                  <tr key={idx}>
-                    <td><span className="badge bg-secondary">{row[2]}</span></td>
-                    <td className={row[11] === 'equipo1' ? 'fw-bold text-success' : ''}>{row[3]}</td>
-                    <td className={row[11] === 'equipo2' ? 'fw-bold text-success' : ''}>{row[4]}</td>
-                    <td>
-                      <span className={`badge ${row[11] === 'empate' ? 'bg-warning' : 'bg-success'}`}>
-                        {row[11] === 'equipo1' ? 'Equipo 1' : row[11] === 'equipo2' ? 'Equipo 2' : 'Empate'}
-                      </span>
-                    </td>
-                    <td className="small">{row[12]}</td>
-                    <td className="text-muted small">{row[0]}</td>
-                  </tr>
-                ))}
+                {datos.reverse().map((row, idx) => {
+                  const round = row.Round || row.round;
+                  const equipo1 = row.Equipo1 || row.equipo1;
+                  const equipo2 = row.Equipo2 || row.equipo2;
+                  const ganador = row.Ganador || row.ganador;
+                  const motivo = row.VictoriaMotivo || row.victoriaMotivo;
+                  const timestamp = row.Timestamp || row.timestamp;
+                  
+                  return (
+                    <tr key={idx}>
+                      <td><span className="badge bg-secondary">{round}</span></td>
+                      <td className={ganador === 'equipo1' ? 'fw-bold text-success' : ''}>{equipo1}</td>
+                      <td className={ganador === 'equipo2' ? 'fw-bold text-success' : ''}>{equipo2}</td>
+                      <td>
+                        <span className={`badge ${ganador === 'empate' ? 'bg-warning' : 'bg-success'}`}>
+                          {ganador === 'equipo1' ? 'Equipo 1' : ganador === 'equipo2' ? 'Equipo 2' : 'Empate'}
+                        </span>
+                      </td>
+                      <td className="small">{motivo}</td>
+                      <td className="text-muted small">{timestamp}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
