@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trophy, X, Check, Plus, Minus, Save, RefreshCw, BarChart3, Award, Clock, Star } from 'lucide-react';
+import { db } from './firebase.js'; // Importa la configuración
+import { collection, addDoc, serverTimestamp, query, onSnapshot, orderBy } from "firebase/firestore";
 
 export default function SistemaPuntuacion() {
   const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzj-8qhQZktFkkODRhMmkPYPSSb4VLJLSAdZMzEfmxYM3gcchEaBT-FYgDVjOhiWt91PA/exec';
@@ -85,109 +87,100 @@ export default function SistemaPuntuacion() {
 
   useEffect(() => {
     if (vista === 'resultados') {
-      cargarResultados();
-      const intervalo = setInterval(cargarResultados, 30000);
-      return () => clearInterval(intervalo);
+      setCargandoResultados(true);
+
+      const colecciones = ['sumo', 'carrera', 'showcase', 'mejorNombre'];
+      const unsubscribers = [];
+
+      const fetchCollection = (nombreColeccion) => {
+        const q = query(collection(db, nombreColeccion), orderBy('timestamp', 'desc'));
+        
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const datos = querySnapshot.docs.map(doc => ({
+            id: doc.id, // Firestore nos da un ID único para cada documento
+            ...doc.data(),
+            // Convertimos el timestamp de Firebase a un formato legible
+            timestamp: doc.data().timestamp?.toDate().toLocaleString('es-CL') || 'N/A'
+          }));
+          
+          // El nombre de la colección 'mejorNombre' no coincide con la clave 'nombre' del estado
+          const keyEstado = nombreColeccion === 'mejorNombre' ? 'nombre' : nombreColeccion;
+          setResultados(prev => ({ ...prev, [keyEstado]: datos }));
+        }, (error) => {
+          console.error(`Error al escuchar ${nombreColeccion}:`, error);
+          mostrarMensaje(`Error al cargar ${nombreColeccion}`, 'error');
+        });
+        
+        unsubscribers.push(unsubscribe);
+      };
+
+      colecciones.forEach(fetchCollection);
+      setCargandoResultados(false);
+
+      // Esta función se ejecuta cuando el componente se desmonta o cambia de vista.
+      // Limpia los "listeners" para evitar consumo de memoria.
+      return () => {
+        unsubscribers.forEach(unsub => unsub());
+      };
     }
   }, [vista]);
 
-  const guardarEnGoogleSheets = async () => {
-    setGuardando(true);
-    
-    try {
-      let datos = {};
-      let hoja = '';
-      
-      if (categoria === 'sumo') {
-        hoja = 'Sumo';
-        datos = {
-          timestamp: new Date().toLocaleString('es-CL'),
-          juez: juez,
-          round: sumoData.round,
-          equipo1: sumoData.equipo1,
-          equipo2: sumoData.equipo2,
-          penalizaciones1_salidaFalsa: sumoData.penalizaciones1.salidaFalsa,
-          penalizaciones1_intervencion: sumoData.penalizaciones1.intervencion ? 'Sí' : 'No',
-          penalizaciones1_conducta: sumoData.penalizaciones1.conducta ? 'Sí' : 'No',
-          penalizaciones2_salidaFalsa: sumoData.penalizaciones2.salidaFalsa,
-          penalizaciones2_intervencion: sumoData.penalizaciones2.intervencion ? 'Sí' : 'No',
-          penalizaciones2_conducta: sumoData.penalizaciones2.conducta ? 'Sí' : 'No',
-          ganador: sumoData.ganador,
-          victoriaMotivo: sumoData.victoriaMotivo,
-          observaciones: sumoData.observaciones
-        };
-      } else if (categoria === 'carrera') {
-        hoja = 'Carrera';
-        datos = {
-          timestamp: new Date().toLocaleString('es-CL'),
-          juez: juez,
-          equipo: carreraData.equipo,
-          intento1_tiempo: carreraData.intentos[0].tiempo,
-          intento1_completado: carreraData.intentos[0].completado === true ? 'Sí' : carreraData.intentos[0].completado === false ? 'No' : '-',
-          intento2_tiempo: carreraData.intentos[1].tiempo,
-          intento2_completado: carreraData.intentos[1].completado === true ? 'Sí' : carreraData.intentos[1].completado === false ? 'No' : '-',
-          intento3_tiempo: carreraData.intentos[2].tiempo,
-          intento3_completado: carreraData.intentos[2].completado === true ? 'Sí' : carreraData.intentos[2].completado === false ? 'No' : '-',
-          mejorTiempo: getMejorTiempo(),
-          penalizaciones_salidaFalsa: carreraData.penalizaciones.salidaFalsa,
-          penalizaciones_salidaPista: carreraData.penalizaciones.salidaPista,
-          penalizaciones_noCompleto: carreraData.penalizaciones.noCompleto,
-          observaciones: carreraData.observaciones
-        };
-      } else if (categoria === 'showcase') {
-        hoja = 'Showcase';
-        datos = {
-          timestamp: new Date().toLocaleString('es-CL'),
-          juez: juez,
-          equipo: showcaseData.equipo,
-          creatividad: showcaseData.creatividad,
-          presentacion: showcaseData.presentacion,
-          materiales: showcaseData.materiales,
-          total: calcularTotalShowcase()
-        };
-      } else if (categoria === 'nombre') {
-        hoja = 'MejorNombre';
-        datos = {
-          timestamp: new Date().toLocaleString('es-CL'),
-          juez: juez,
-          equipo: nombreData.equipo,
-          nombreRobot: nombreData.nombreRobot,
-          originalidad: nombreData.originalidad,
-          creatividad: nombreData.creatividad,
-          total: calcularTotalNombre()
-        };
-      }
+const guardarEnFirestore = async () => {
+  if (!juez) {
+    mostrarMensaje('Por favor, ingresa tu nombre de juez.', 'error');
+    return;
+  }
+  
+  setGuardando(true);
+  
+  try {
+    let coleccionTarget = '';
+    let datos = {};
 
-      const valores = Object.values(datos);
-      
-      // Usar no-cors para evitar problemas de CORS en POST
-      await fetch(SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sheetName: hoja,
-          values: valores
-        })
-      });
-
-      // Con no-cors no podemos leer la respuesta, así que asumimos éxito
-      mostrarMensaje('✓ Datos guardados correctamente', 'success');
-      
-      // Opcional: Recargar resultados después de guardar
-      if (vista === 'resultados') {
-        setTimeout(() => cargarResultados(), 1000);
-      }
-      
-    } catch (error) {
-      console.error('Error:', error);
-      mostrarMensaje('✗ Error al guardar. Verifica la conexión.', 'error');
-    } finally {
-      setGuardando(false);
+    switch (categoria) {
+      case 'sumo':
+        coleccionTarget = 'sumo';
+        datos = sumoData;
+        break;
+      case 'carrera':
+        coleccionTarget = 'carrera';
+        datos = { ...carreraData, mejorTiempo: getMejorTiempo() };
+        break;
+      case 'showcase':
+        coleccionTarget = 'showcase';
+        datos = { ...showcaseData, total: calcularTotalShowcase() };
+        break;
+      case 'nombre':
+        coleccionTarget = 'mejorNombre';
+        datos = { ...nombreData, total: calcularTotalNombre() };
+        break;
+      default:
+        throw new Error('Categoría no válida');
     }
-  };
+
+    // Añadir datos comunes y el timestamp del servidor
+    const datosCompletos = {
+      ...datos,
+      juez: juez,
+      timestamp: serverTimestamp() // Firebase gestiona la fecha/hora
+    };
+    
+    // Guardar el documento en la colección correspondiente
+    await addDoc(collection(db, coleccionTarget), datosCompletos);
+
+    mostrarMensaje('✓ Datos guardados correctamente', 'success');
+    
+    // Limpiar el formulario después de guardar
+    if (categoria === 'sumo') resetSumo();
+    if (categoria === 'carrera') resetCarrera();
+
+  } catch (error) {
+    console.error('Error al guardar en Firestore:', error);
+    mostrarMensaje('✗ Error al guardar. Intenta de nuevo.', 'error');
+  } finally {
+    setGuardando(false);
+  }
+};
 
   const resetSumo = () => {
     setSumoData({
@@ -417,29 +410,20 @@ export default function SistemaPuntuacion() {
                 </tr>
               </thead>
               <tbody>
-                {datos.reverse().map((row, idx) => {
-                  const round = row.Round || row.round;
-                  const equipo1 = row.Equipo1 || row.equipo1;
-                  const equipo2 = row.Equipo2 || row.equipo2;
-                  const ganador = row.Ganador || row.ganador;
-                  const motivo = row.VictoriaMotivo || row.victoriaMotivo;
-                  const timestamp = row.Timestamp || row.timestamp;
-                  
-                  return (
-                    <tr key={idx}>
-                      <td><span className="badge bg-secondary">{round}</span></td>
-                      <td className={ganador === 'equipo1' ? 'fw-bold text-success' : ''}>{equipo1}</td>
-                      <td className={ganador === 'equipo2' ? 'fw-bold text-success' : ''}>{equipo2}</td>
-                      <td>
-                        <span className={`badge ${ganador === 'empate' ? 'bg-warning' : 'bg-success'}`}>
-                          {ganador === 'equipo1' ? 'Equipo 1' : ganador === 'equipo2' ? 'Equipo 2' : 'Empate'}
-                        </span>
-                      </td>
-                      <td className="small">{motivo}</td>
-                      <td className="text-muted small">{timestamp}</td>
-                    </tr>
-                  );
-                })}
+                {resultados.sumo.map((row, idx) => (
+                  <tr key={idx}>
+                    <td><span className="badge bg-secondary">{row.round}</span></td>
+                    <td className={row.ganador === 'equipo1' ? 'fw-bold text-success' : ''}>{row.equipo1}</td>
+                    <td className={row.ganador === 'equipo2' ? 'fw-bold text-success' : ''}>{row.equipo2}</td>
+                    <td>
+                      <span className={`badge ${row.ganador === 'empate' ? 'bg-warning' : 'bg-success'}`}>
+                        {row.ganador === 'equipo1' ? 'Equipo 1' : row.ganador === 'equipo2' ? 'Equipo 2' : 'Empate'}
+                      </span>
+                    </td>
+                    <td className="small">{row.victoriaMotivo}</td>
+                    <td className="text-muted small">{row.timestamp}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -509,7 +493,7 @@ export default function SistemaPuntuacion() {
                     </div>
                     <div className="col-md-6 text-end">
                       <button
-                        onClick={guardarEnGoogleSheets}
+                        onClick={guardarEnFirestore} // <-- CAMBIO AQUÍ
                         disabled={guardando}
                         className="btn btn-success btn-lg"
                       >
