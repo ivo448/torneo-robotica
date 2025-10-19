@@ -1,49 +1,51 @@
-import { useState } from 'react';
-import { guardarDatos } from '../services/apiService';
-import { CATEGORIAS } from '../config/constants';
+import { useState } from "react";
+import { guardarEnFirestore } from "../services/firebaseService";
+import { CATEGORIAS } from "../config/constants";
 import {
-  transformSumoData,
-  transformCarreraData,
-  transformShowcaseData,
-  transformNombreData
-} from '../utils/dataTransformers';
+  getMejorTiempo,
+  calcularTotalShowcase,
+  calcularTotalNombre,
+} from "../utils/helpers";
 
-export const useSaveData = (mostrarMensaje, vista, cargarResultados) => {
+export const useSaveData = (mostrarMensaje) => {
   const [guardando, setGuardando] = useState(false);
 
-  const guardar = async (categoria, data, juez) => {
+  const guardar = async (categoria, data, juez, resetCallback) => {
+    if (!juez) {
+      mostrarMensaje("Por favor, ingresa tu nombre de juez.", "error");
+      return;
+    }
+
     setGuardando(true);
-    
+
     try {
-      let datosTransformados;
-      
+      let datos = { ...data };
+
+      // Agregar campos calculados según categoría
       switch (categoria) {
-        case CATEGORIAS.SUMO:
-          datosTransformados = transformSumoData(data, juez);
-          break;
         case CATEGORIAS.CARRERA:
-          datosTransformados = transformCarreraData(data, juez);
+          datos.mejorTiempo = getMejorTiempo(data.intentos);
           break;
         case CATEGORIAS.SHOWCASE:
-          datosTransformados = transformShowcaseData(data, juez);
+          datos.total = calcularTotalShowcase(data);
           break;
         case CATEGORIAS.NOMBRE:
-          datosTransformados = transformNombreData(data, juez);
+          datos.total = calcularTotalNombre(data);
           break;
         default:
-          throw new Error('Categoría no válida');
+          break;
       }
 
-      await guardarDatos(categoria, datosTransformados, juez);
-      mostrarMensaje('✓ Datos guardados correctamente', 'success');
-      
-      if (vista === 'resultados') {
-        setTimeout(() => cargarResultados(), 1000);
+      await guardarEnFirestore(categoria, datos, juez);
+      mostrarMensaje("✓ Datos guardados correctamente", "success");
+
+      // Limpiar formulario después de guardar
+      if (resetCallback) {
+        resetCallback();
       }
-      
     } catch (error) {
-      console.error('Error:', error);
-      mostrarMensaje('✗ Error al guardar. Verifica la conexión.', 'error');
+      console.error("Error al guardar en Firestore:", error);
+      mostrarMensaje("✗ Error al guardar. Intenta de nuevo.", "error");
     } finally {
       setGuardando(false);
     }

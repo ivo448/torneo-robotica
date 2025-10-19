@@ -25,38 +25,42 @@ export default function App() {
   const [nombreData, setNombreData] = useState(initialNombreData);
 
   const { mensaje, mostrarMensaje } = useMensaje();
-  const { resultados, cargandoResultados, cargarResultados } = useResultados(
+  const { resultados, cargandoResultados } = useResultados(
     vista,
     mostrarMensaje,
   );
-  const { guardar, guardando } = useSaveData(
-    mostrarMensaje,
-    vista,
-    cargarResultados,
-  );
+  const { guardar, guardando } = useSaveData(mostrarMensaje);
 
   const resetSumo = () => setSumoData(initialSumoData);
   const resetCarrera = () => setCarreraData(initialCarreraData);
+  const resetShowcase = () => setShowcaseData(initialShowcaseData);
+  const resetNombre = () => setNombreData(initialNombreData);
 
   const handleGuardar = () => {
-    let data;
+    let data, resetCallback;
+
     switch (categoria) {
       case CATEGORIAS.SUMO:
         data = sumoData;
+        resetCallback = resetSumo;
         break;
       case CATEGORIAS.CARRERA:
         data = carreraData;
+        resetCallback = resetCarrera;
         break;
       case CATEGORIAS.SHOWCASE:
         data = showcaseData;
+        resetCallback = resetShowcase;
         break;
       case CATEGORIAS.NOMBRE:
         data = nombreData;
+        resetCallback = resetNombre;
         break;
       default:
         return;
     }
-    guardar(categoria, data, juez);
+
+    guardar(categoria, data, juez, resetCallback);
   };
 
   return (
@@ -100,7 +104,6 @@ export default function App() {
           ) : (
             <VistaResultados
               resultados={resultados}
-              cargarResultados={cargarResultados}
               cargandoResultados={cargandoResultados}
             />
           )}
